@@ -3,13 +3,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-// anthropic sdk
+// Anthropic SDK
 const sdk_1 = require("@anthropic-ai/sdk");
-// mcp sdk
+// MCP Client
 const index_js_1 = require("@modelcontextprotocol/sdk/client/index.js");
 const stdio_js_1 = require("@modelcontextprotocol/sdk/client/stdio.js");
+// Express
+const express_1 = __importDefault(require("express"));
+const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
-const promises_1 = __importDefault(require("readline/promises"));
 dotenv_1.default.config();
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 if (!ANTHROPIC_API_KEY) {
@@ -26,37 +28,39 @@ class MCPClient {
         });
         this.mcp = new index_js_1.Client({ name: "mcp-client-cli", version: "1.0.0" });
     }
-    // Connect to the MCP
     async connectToServer(serverScriptPath) {
-        const isJs = serverScriptPath.endsWith(".js");
-        const isPy = serverScriptPath.endsWith(".py");
-        if (!isJs && !isPy) {
-            throw new Error("Server script must be a .js or .py file");
+        try {
+            const isJs = serverScriptPath.endsWith(".js");
+            const isPy = serverScriptPath.endsWith(".py");
+            if (!isJs && !isPy) {
+                throw new Error("Server script must be a .js or .py file");
+            }
+            const command = isPy
+                ? process.platform === "win32"
+                    ? "python"
+                    : "python3"
+                : process.execPath;
+            this.transport = new stdio_js_1.StdioClientTransport({
+                command,
+                args: [serverScriptPath],
+            });
+            await this.mcp.connect(this.transport);
+            const toolsResult = await this.mcp.listTools();
+            this.tools = toolsResult.tools.map((tool) => {
+                return {
+                    name: tool.name,
+                    description: tool.description,
+                    input_schema: tool.inputSchema,
+                };
+            });
+            console.log("Connected to server with tools:", this.tools.map(({ name }) => name));
         }
-        const command = isPy
-            ? process.platform === "win32"
-                ? "python"
-                : "python3"
-            : process.execPath;
-        this.transport = new stdio_js_1.StdioClientTransport({
-            command, // python /path/to/server.py
-            args: [serverScriptPath],
-        });
-        await this.mcp.connect(this.transport);
-        // Register tools
-        const toolsResult = await this.mcp.listTools();
-        this.tools = toolsResult.tools.map((tool) => {
-            return {
-                name: tool.name,
-                description: tool.description,
-                input_schema: tool.inputSchema,
-            };
-        });
-        console.log("Connected to server with tools:", this.tools.map(({ name }) => name));
+        catch (e) {
+            console.log("Failed to connect to MCP server: ", e);
+            throw e;
+        }
     }
-    // Process query
     async processQuery(query) {
-        // call th llm
         const messages = [
             {
                 role: "user",
@@ -69,16 +73,13 @@ class MCPClient {
             messages,
             tools: this.tools,
         });
-        // check the response
         const finalText = [];
         const toolResults = [];
-        // if text -> return response
         for (const content of response.content) {
             if (content.type === "text") {
                 finalText.push(content.text);
             }
             else if (content.type === "tool_use") {
-                // if tool -> call the tool on mcp server
                 const toolName = content.name;
                 const toolArgs = content.input;
                 const result = await this.mcp.callTool({
@@ -101,27 +102,6 @@ class MCPClient {
         }
         return finalText.join("\n");
     }
-    async chatLoop() {
-        const rl = promises_1.default.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-        });
-        try {
-            console.log("\nMCP Client Started!");
-            console.log("Type your queries or 'quit' to exit.");
-            while (true) {
-                const message = await rl.question("\nQuery: ");
-                if (message.toLowerCase() === "quit") {
-                    break;
-                }
-                const response = await this.processQuery(message);
-                console.log("\n" + response);
-            }
-        }
-        finally {
-            rl.close();
-        }
-    }
     async cleanup() {
         await this.mcp.close();
     }
@@ -131,14 +111,51 @@ async function main() {
         console.log("Usage: node index.ts <path_to_server_script>");
         return;
     }
+    const app = (0, express_1.default)();
+    const port = process.env.PORT || 3000;
+    // Middleware
+    app.use((0, cors_1.default)());
+    app.use(express_1.default.json());
     const mcpClient = new MCPClient();
     try {
         await mcpClient.connectToServer(process.argv[2]);
-        await mcpClient.chatLoop();
+        // Health check endpoint
+        const healthCheck = (req, res) => {
+            res.json({ status: 'ok', tools: mcpClient.tools.map(t => t.name) });
+        };
+        app.get('/health', healthCheck);
+        // LLM interaction endpoint
+        const chatHandler = async (req, res) => {
+            try {
+                const { query } = req.body;
+                if (!query) {
+                    res.status(400).json({ error: 'Query is required' });
+                    return;
+                }
+                const response = await mcpClient.processQuery(query);
+                res.json({ response });
+            }
+            catch (error) {
+                console.error('Error processing query:', error);
+                res.status(500).json({ error: 'Failed to process query' });
+            }
+        };
+        app.post('/chat', chatHandler);
+        app.listen(port, () => {
+            console.log(`Server running on port ${port}`);
+            console.log(`Health check: http://localhost:${port}/health`);
+            console.log(`Chat endpoint: http://localhost:${port}/chat`);
+        });
+        // Handle graceful shutdown
+        process.on('SIGTERM', async () => {
+            console.log('SIGTERM received. Shutting down gracefully...');
+            await mcpClient.cleanup();
+            process.exit(0);
+        });
     }
-    finally {
-        await mcpClient.cleanup();
-        process.exit(0);
+    catch (error) {
+        console.error('Failed to start server:', error);
+        process.exit(1);
     }
 }
 main();
