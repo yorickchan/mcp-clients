@@ -2,8 +2,8 @@
 
 ## 准备 mcp server
 
-首先你需要有一个本地的 mcp server。
-本例中使用<https://github.com/liaokongVFX/MCP-Chinese-Getting-Started-Guide>中的 mcp server。
+首先你需要有一个本地的 mcp server。  
+本例中使用<https://github.com/liaokongVFX/MCP-Chinese-Getting-Started-Guide>中的 mcp server。  
 具体代码：
 <https://github.com/mundane799699/mcp-server-example>
 
@@ -19,10 +19,10 @@ node build/index.js D:\project\PycharmProjects\mcp_getting_started\web_search.py
 
 ## 测试
 
-使用 api 测试工具调用接口。
-接口 1：
-http://localhost:3000/chat
-get 请求
+使用 api 测试工具调用接口。  
+接口 1：  
+http://localhost:3000/chat  
+get 请求  
 返回：
 
 ```json
@@ -32,9 +32,9 @@ get 请求
 }
 ```
 
-接口 2:
-http://localhost:3000/chat
-post 请求
+接口 2:  
+http://localhost:3000/chat  
+post 请求  
 请求参数示例：
 
 ```json
