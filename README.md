@@ -21,7 +21,7 @@ node build/index.js D:\project\PycharmProjects\mcp_getting_started\web_search.py
 
 使用 api 测试工具调用接口。  
 接口 1：  
-http://localhost:3000/chat  
+http://localhost:3000/health  
 get 请求  
 返回：
 
