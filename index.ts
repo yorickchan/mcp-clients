@@ -20,6 +20,7 @@ dotenv.config();
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const baseUrl = process.env.OPENAI_BASE_URL;
 const model = process.env.OPENAI_MODEL || "gpt-4o";
+const wereadCookie = process.env.WEREAD_COOKIE;
 if (!OPENAI_API_KEY) {
   throw new Error("OPENAI_API_KEY is not set");
 }
@@ -45,13 +46,37 @@ class MCPClient {
       if (!isJs && !isPy) {
         throw new Error("Server script must be a .js or .py file");
       }
-      const command = isPy ? "uv" : process.execPath;
+
+      let command: string;
+      let args: string[];
+      let cwd: string | undefined;
+      let env: Record<string, string> | undefined;
+
+      if (isPy) {
+        // Python MCP server
+        command = "uv";
+        args = ["run", "python", serverScriptPath];
+        cwd = require("path").dirname(serverScriptPath);
+      } else if (isJs) {
+        // JavaScript MCP server
+        command = "node";
+        args = [serverScriptPath];
+        cwd = require("path").dirname(serverScriptPath);
+        // 为 JavaScript MCP server 传递环境变量
+        env = {
+          WEREAD_COOKIE: wereadCookie || "",
+        };
+      } else {
+        throw new Error("Unsupported server script type");
+      }
 
       this.transport = new StdioClientTransport({
         command,
-        args: isPy ? ["run", "python", serverScriptPath] : [serverScriptPath],
-        cwd: isPy ? require("path").dirname(serverScriptPath) : undefined,
+        args,
+        cwd,
+        ...(env && { env }),
       });
+
       await this.mcp.connect(this.transport);
 
       const toolsResult = await this.mcp.listTools();
@@ -69,6 +94,17 @@ class MCPClient {
         "Connected to server with tools:",
         this.tools.map((tool) => tool.function.name)
       );
+      console.log(
+        `Successfully connected to ${
+          isPy ? "Python" : "JavaScript"
+        } MCP server: ${serverScriptPath}`
+      );
+
+      if (isJs && wereadCookie) {
+        console.log(
+          "WEREAD_COOKIE environment variable passed to JavaScript MCP server"
+        );
+      }
     } catch (e) {
       console.log("Failed to connect to MCP server: ", e);
       throw e;
