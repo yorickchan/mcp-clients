@@ -23,6 +23,13 @@
             "env": {
                 "AMAP_MAPS_API_KEY": "your api key"
             }
+        },
+        "DuckDuckGo Search Server": {
+            "command": "uvx",
+            "args": [
+                "duckduckgo-mcp-server"
+            ],
+            "env": {}
         }
     }
 }
