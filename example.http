@@ -6,5 +6,14 @@ POST http://localhost:3000/chat HTTP/1.1
 content-type: application/json
 
 {
-    "query": "香港未來一周天氣"
+    "query": "what is the time now"
+}
+
+### 
+
+POST http://localhost:3000/chat HTTP/1.1
+content-type: application/json
+
+{
+    "query": "search the latest news about AI"
 }

@@ -28,9 +28,9 @@ if (!OPENAI_API_KEY) {
 const mcpConfig = JSON.parse(fs.readFileSync('./mcpserver.json', 'utf8'))
 
 class MCPClient {
-  private mcp: Client
+  private mcpClients: Map<string, Client> = new Map()
   private llm: OpenAI
-  private transport: StdioClientTransport | null = null
+  private transports: Map<string, StdioClientTransport> = new Map()
   public tools: ChatCompletionTool[] = []
 
   constructor() {
@@ -38,48 +38,77 @@ class MCPClient {
       apiKey: OPENAI_API_KEY,
       baseURL: baseUrl,
     })
-    this.mcp = new Client({ name: 'mcp-client-cli', version: '1.0.0' })
   }
 
-  async connectToConfiguredServer(serverName: string) {
-    try {
-      const serverConfig = mcpConfig.mcpServers[serverName]
-      if (!serverConfig) {
-        throw new Error(`Server '${serverName}' not found in mcpserver.json`)
+  async connectToAllConfiguredServers() {
+    const serverNames = Object.keys(mcpConfig.mcpServers)
+    console.log(`Connecting to ${serverNames.length} MCP servers: ${serverNames.join(', ')}`)
+
+    const connectionPromises = serverNames.map(async (serverName) => {
+      try {
+        const serverConfig = mcpConfig.mcpServers[serverName]
+        console.log(`Connecting to MCP server: ${serverName}`)
+
+        const client = new Client({ name: `mcp-client-${serverName}`, version: '1.0.0' })
+        const transport = new StdioClientTransport({
+          command: serverConfig.command,
+          args: serverConfig.args || [],
+          env: serverConfig.env || {},
+        })
+
+        await client.connect(transport)
+        this.mcpClients.set(serverName, client)
+        this.transports.set(serverName, transport)
+
+        const toolsResult = await client.listTools()
+        const serverTools = toolsResult.tools.map((tool) => {
+          return {
+            type: 'function' as const,
+            function: {
+              name: `${serverName}.${tool.name}`,
+              description: `[${serverName}] ${tool.description}`,
+              parameters: tool.inputSchema,
+            },
+          }
+        })
+        
+        this.tools.push(...serverTools)
+        console.log(
+          `Connected to ${serverName} with tools:`,
+          serverTools.map((tool) => tool.function.name)
+        )
+        console.log(`Successfully connected to MCP server: ${serverName}`)
+        
+        return { serverName, success: true, toolCount: serverTools.length }
+      } catch (e) {
+        console.log(`Failed to connect to MCP server ${serverName}:`, e)
+        return { serverName, success: false, error: e }
       }
+    })
 
-      console.log(`Connecting to configured MCP server: ${serverName}`)
+    const results = await Promise.allSettled(connectionPromises)
+    const successfulConnections = results
+      .filter((result) => result.status === 'fulfilled' && result.value.success)
+      .map((result) => (result as PromiseFulfilledResult<any>).value)
+    
+    const failedConnections = results
+      .filter((result) => result.status === 'fulfilled' && !result.value.success)
+      .map((result) => (result as PromiseFulfilledResult<any>).value)
 
-      this.transport = new StdioClientTransport({
-        command: serverConfig.command,
-        args: serverConfig.args || [],
-        env: serverConfig.env || {},
+    console.log(`\nConnection Summary:`)
+    console.log(`✅ Successfully connected: ${successfulConnections.length} servers`)
+    successfulConnections.forEach(conn => {
+      console.log(`   - ${conn.serverName} (${conn.toolCount} tools)`)
+    })
+    
+    if (failedConnections.length > 0) {
+      console.log(`❌ Failed connections: ${failedConnections.length} servers`)
+      failedConnections.forEach(conn => {
+        console.log(`   - ${conn.serverName}: ${conn.error?.message || 'Unknown error'}`)
       })
-
-      await this.mcp.connect(this.transport)
-
-      const toolsResult = await this.mcp.listTools()
-      this.tools = toolsResult.tools.map((tool) => {
-        return {
-          type: 'function' as const,
-          function: {
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.inputSchema,
-          },
-        }
-      })
-      console.log(
-        'Connected to server with tools:',
-        this.tools.map((tool) => tool.function.name)
-      )
-      console.log(
-        `Successfully connected to configured MCP server: ${serverName}`
-      )
-    } catch (e) {
-      console.log('Failed to connect to MCP server: ', e)
-      throw e
     }
+    
+    console.log(`\nTotal tools available: ${this.tools.length}`)
   }
 
   async processQuery(query: string) {
@@ -112,8 +141,18 @@ class MCPClient {
           const toolName = toolCall.function.name
           const toolArgs = JSON.parse(toolCall.function.arguments)
 
-          const result = await this.mcp.callTool({
-            name: toolName,
+          // Parse server name and actual tool name
+          const [serverName, actualToolName] = toolName.includes('.') 
+            ? toolName.split('.', 2)
+            : [Array.from(this.mcpClients.keys())[0], toolName]
+
+          const client = this.mcpClients.get(serverName)
+          if (!client) {
+            throw new Error(`MCP client for server '${serverName}' not found`)
+          }
+
+          const result = await client.callTool({
+            name: actualToolName,
             arguments: toolArgs,
           })
           console.log('11111111', result.content)
@@ -155,22 +194,19 @@ class MCPClient {
   }
 
   async cleanup() {
-    await this.mcp.close()
+    const closePromises = Array.from(this.mcpClients.values()).map(client => client.close())
+    await Promise.allSettled(closePromises)
+    this.mcpClients.clear()
+    this.transports.clear()
   }
 }
 
 async function main() {
-  if (process.argv.length < 3) {
-    console.log(`Received ${process.argv.length} arguments`)
-    console.log(
-      'Usage: node index.ts <server_name_from_config | path_to_server_script>'
-    )
-    console.log(
-      'Available configured servers:',
-      Object.keys(mcpConfig.mcpServers).join(', ')
-    )
-    return
-  }
+  console.log('Starting MCP Client Server...')
+  console.log(
+    'Available configured servers:',
+    Object.keys(mcpConfig.mcpServers).join(', ')
+  )
 
   const app = express()
   const port = process.env.PORT || 3000
@@ -182,12 +218,8 @@ async function main() {
   const mcpClient = new MCPClient()
 
   try {
-    const serverArg = process.argv[2]
-
-    // Check if the argument is a configured server name
-    if (mcpConfig.mcpServers[serverArg]) {
-      await mcpClient.connectToConfiguredServer(serverArg)
-    }
+    // Connect to all configured servers
+    await mcpClient.connectToAllConfiguredServers()
 
     // Health check endpoint
     const healthCheck: RequestHandler = (_req, res) => {
@@ -235,4 +267,5 @@ async function main() {
 }
 
 main()
-// node build/index.js D:\project\PycharmProjects\mcp_getting_started\web_search.py
+// Usage: npm start or node build/index.js
+// The server will automatically connect to all MCP servers configured in mcpserver.json
