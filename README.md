@@ -1,5 +1,13 @@
 # 用 typescript、express 写的简单的 mcp client
 
+## 配置 LLM Service
+
+```bash
+cp .env.example .env
+```
+
+edit .env to your LLM service
+
 ## 准备 mcp server
 
 config the mcp server in mcpserver.json
