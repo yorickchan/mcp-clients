@@ -17,3 +17,21 @@ content-type: application/json
 {
     "query": "search the latest news about AI"
 }
+
+###
+
+POST http://localhost:3000/chat HTTP/1.1
+content-type: application/json
+
+{
+    "query": "你是什麼版本的模型"
+}
+
+###
+
+POST http://localhost:3000/chat HTTP/1.1
+content-type: application/json
+
+{
+    "query": "深圳天氣"
+}

@@ -42,14 +42,21 @@ class MCPClient {
 
   async connectToAllConfiguredServers() {
     const serverNames = Object.keys(mcpConfig.mcpServers)
-    console.log(`Connecting to ${serverNames.length} MCP servers: ${serverNames.join(', ')}`)
+    console.log(
+      `Connecting to ${serverNames.length} MCP servers: ${serverNames.join(
+        ', '
+      )}`
+    )
 
     const connectionPromises = serverNames.map(async (serverName) => {
       try {
         const serverConfig = mcpConfig.mcpServers[serverName]
         console.log(`Connecting to MCP server: ${serverName}`)
 
-        const client = new Client({ name: `mcp-client-${serverName}`, version: '1.0.0' })
+        const client = new Client({
+          name: `mcp-client-${serverName}`,
+          version: '1.0.0',
+        })
         const transport = new StdioClientTransport({
           command: serverConfig.command,
           args: serverConfig.args || [],
@@ -62,23 +69,25 @@ class MCPClient {
 
         const toolsResult = await client.listTools()
         const serverTools = toolsResult.tools.map((tool) => {
+          // Sanitize server name to only contain valid characters for tool names
+          const sanitizedServerName = serverName.replace(/[^a-zA-Z0-9_-]/g, '_')
           return {
             type: 'function' as const,
             function: {
-              name: `${serverName}.${tool.name}`,
+              name: `${sanitizedServerName}_${tool.name}`,
               description: `[${serverName}] ${tool.description}`,
               parameters: tool.inputSchema,
             },
           }
         })
-        
+
         this.tools.push(...serverTools)
         console.log(
           `Connected to ${serverName} with tools:`,
           serverTools.map((tool) => tool.function.name)
         )
         console.log(`Successfully connected to MCP server: ${serverName}`)
-        
+
         return { serverName, success: true, toolCount: serverTools.length }
       } catch (e) {
         console.log(`Failed to connect to MCP server ${serverName}:`, e)
@@ -90,24 +99,30 @@ class MCPClient {
     const successfulConnections = results
       .filter((result) => result.status === 'fulfilled' && result.value.success)
       .map((result) => (result as PromiseFulfilledResult<any>).value)
-    
+
     const failedConnections = results
-      .filter((result) => result.status === 'fulfilled' && !result.value.success)
+      .filter(
+        (result) => result.status === 'fulfilled' && !result.value.success
+      )
       .map((result) => (result as PromiseFulfilledResult<any>).value)
 
     console.log(`\nConnection Summary:`)
-    console.log(`✅ Successfully connected: ${successfulConnections.length} servers`)
-    successfulConnections.forEach(conn => {
+    console.log(
+      `✅ Successfully connected: ${successfulConnections.length} servers`
+    )
+    successfulConnections.forEach((conn) => {
       console.log(`   - ${conn.serverName} (${conn.toolCount} tools)`)
     })
-    
+
     if (failedConnections.length > 0) {
       console.log(`❌ Failed connections: ${failedConnections.length} servers`)
-      failedConnections.forEach(conn => {
-        console.log(`   - ${conn.serverName}: ${conn.error?.message || 'Unknown error'}`)
+      failedConnections.forEach((conn) => {
+        console.log(
+          `   - ${conn.serverName}: ${conn.error?.message || 'Unknown error'}`
+        )
       })
     }
-    
+
     console.log(`\nTotal tools available: ${this.tools.length}`)
   }
 
@@ -121,7 +136,6 @@ class MCPClient {
 
     const response = await this.llm.chat.completions.create({
       model,
-      max_tokens: 1000,
       messages,
       tools: this.tools,
     })
@@ -142,9 +156,37 @@ class MCPClient {
           const toolArgs = JSON.parse(toolCall.function.arguments)
 
           // Parse server name and actual tool name
-          const [serverName, actualToolName] = toolName.includes('.') 
-            ? toolName.split('.', 2)
-            : [Array.from(this.mcpClients.keys())[0], toolName]
+          let serverName: string
+          let actualToolName: string
+
+          if (toolName.includes('_')) {
+            // Find the matching server by checking if the tool name starts with the sanitized server name
+            const matchingServer = Array.from(this.mcpClients.keys()).find(
+              (name) => {
+                const sanitizedName = name.replace(/[^a-zA-Z0-9_-]/g, '_')
+                return toolName.startsWith(sanitizedName + '_')
+              }
+            )
+
+            if (matchingServer) {
+              serverName = matchingServer
+              const sanitizedServerName = matchingServer.replace(
+                /[^a-zA-Z0-9_-]/g,
+                '_'
+              )
+              actualToolName = toolName.substring(
+                sanitizedServerName.length + 1
+              )
+            } else {
+              // Fallback to original logic
+              const parts = toolName.split('_', 2)
+              serverName = parts[0]
+              actualToolName = parts[1]
+            }
+          } else {
+            serverName = Array.from(this.mcpClients.keys())[0]
+            actualToolName = toolName
+          }
 
           const client = this.mcpClients.get(serverName)
           if (!client) {
@@ -178,7 +220,6 @@ class MCPClient {
 
           const followUpResponse = await this.llm.chat.completions.create({
             model,
-            max_tokens: 1000,
             messages,
           })
 
@@ -194,7 +235,9 @@ class MCPClient {
   }
 
   async cleanup() {
-    const closePromises = Array.from(this.mcpClients.values()).map(client => client.close())
+    const closePromises = Array.from(this.mcpClients.values()).map((client) =>
+      client.close()
+    )
     await Promise.allSettled(closePromises)
     this.mcpClients.clear()
     this.transports.clear()
