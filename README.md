@@ -2,20 +2,15 @@
 
 ## 准备 mcp server
 
-首先你需要有一个本地的 mcp server。  
-本例中使用<https://github.com/liaokongVFX/MCP-Chinese-Getting-Started-Guide>中的 mcp server。  
-具体代码：
-<https://github.com/mundane799699/mcp-server-example>
+config the mcp server in mcpserver.json
 
 ## 启动 mcp client
 
 ```bash
 npm install
 npm run build
-node build/index.js D:\project\PycharmProjects\mcp_getting_started\web_search.py
+node build/index.js
 ```
-
-`D:\project\PycharmProjects\mcp_getting_started\web_search.py`要换成你自己的路径
 
 ## 测试
 
