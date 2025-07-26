@@ -1,5 +1,6 @@
 // OpenAI SDK
 
+import fs from 'node:fs'
 // MCP Client
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
@@ -8,7 +9,6 @@ import dotenv from 'dotenv'
 import type { RequestHandler } from 'express'
 // Express
 import express from 'express'
-import fs from 'fs'
 import OpenAI from 'openai'
 import {
   ChatCompletionMessageParam,
@@ -172,10 +172,6 @@ async function main() {
     return
   }
 
-  process.argv.forEach(function (val, index, array) {
-    console.log(index + ': ' + val)
-  })
-
   const app = express()
   const port = process.env.PORT || 3000
 
@@ -194,7 +190,7 @@ async function main() {
     }
 
     // Health check endpoint
-    const healthCheck: RequestHandler = (req, res) => {
+    const healthCheck: RequestHandler = (_req, res) => {
       res.json({
         status: 'ok',
         tools: mcpClient.tools.map((t) => t.function.name),
